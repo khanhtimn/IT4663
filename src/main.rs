@@ -21,6 +21,6 @@ fn main() {
     let mut simplex = Simplex::new(c, A, b);
 
     if let Some(result) = simplex.solve() {
-        println!("Ket qua:\nx = {} f(x) = {}", result.1, result.0);
+        println!("Ket qua:\nx = {:.4} f(x) = {:.4}", result.1, result.0);
     }
 }

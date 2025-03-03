@@ -60,7 +60,7 @@ impl Simplex {
 
         self.tableau
             .row_part_mut(pivot_row, self.tableau.ncols() - 1)
-            .scale_mut(1.0 / pivot_element);
+            .scale_mut(pivot_element.recip());
 
         for row in 0..self.tableau.nrows() {
             if row != pivot_row {
@@ -128,7 +128,7 @@ impl Simplex {
         // Thuc hien xoay
         self.pivot(pivot_row, pivot_column);
 
-        println!("{}", self.tableau);
+        println!("{:.4}", self.tableau);
 
         true
     }

@@ -1,3 +1,4 @@
+use approx::*;
 use nalgebra::*;
 use std::{cmp::Ordering, f64};
 
@@ -15,6 +16,7 @@ impl Simplex {
     #[allow(non_snake_case)]
     pub fn new(c: DVector<f64>, A: DMatrix<f64>, b: DVector<f64>) -> Self {
         // Lap bang don hinh + bien phu + cot z + RHS
+        // TODO: Test cot co so co san
         #[allow(clippy::toplevel_ref_arg)]
         let tableau = stack![
             A, DMatrix::identity(A.nrows(), A.nrows()), DVector::zeros(A.nrows()), b;
@@ -145,13 +147,11 @@ impl Simplex {
             let basic_row = column_vector
                 .iter()
                 .enumerate()
-                .filter(|&(_, &val)| val.abs() > 1e-10)
+                .filter(|&(_, &val)| val.abs().is_normal())
                 .collect::<Vec<_>>();
 
-            println!("{:?}", basic_row);
-
             // Neu co chinh xac mot so 1 va con lai la so 0 (Tinh ca phan gan dung)
-            if basic_row.len() == 1 && (basic_row[0].1 - 1.0).abs() < 1e-10 {
+            if basic_row.len() == 1 && abs_diff_eq!(basic_row[0].1, &1.0) {
                 let row = basic_row[0].0;
                 solution[column] = self.tableau[(row, self.tableau.ncols() - 2)];
             }
@@ -160,5 +160,201 @@ impl Simplex {
         let c_value = self.tableau[(self.tableau.nrows() - 1, self.tableau.ncols() - 2)];
 
         Some((c_value, solution))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tableau_construction() {
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let simplex = Simplex::new(c, A, b);
+
+        assert_eq!(simplex.tableau.nrows(), 4); // 3 hang rang buoc + 1 hang ham muc tieu
+        assert_eq!(simplex.tableau.ncols(), 8); // 2 bien + 3 bien phu + 1 z + 1 RHS + 1 E
+    }
+
+    #[test]
+    fn test_find_pivot_column() {
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let simplex = Simplex::new(c, A, b);
+
+        // He so ham muc tieu o trong bang duoc dao dau
+        // vay nen -3 va -2 se xuat hien o hang cuoi cua bang don hinh
+        let pivot_column = simplex.find_pivot_column();
+
+        // Cot co he so ham muc tieu nho nhat se duoc chon
+        // Trong truong hop nay la cot thu nhat
+        assert_eq!(pivot_column, 0);
+    }
+
+    #[test]
+    fn test_update_ratio_column() {
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+
+        // Gia su cot xoay la cot 1
+        let pivot_col = 0;
+        simplex.update_ratio_column(pivot_col);
+
+        // Kiem tra gia tri cot uoc luong
+        // Voi 3 hang dau tien, ket qua la 7/2, 8/1, 2/1
+        let expected_ratios = [3.5, 8.0, 2.0];
+
+        for (i, &expected) in expected_ratios.iter().enumerate() {
+            assert_abs_diff_eq!(simplex.tableau[(i, simplex.tableau.ncols() - 1)], expected);
+        }
+    }
+
+    #[test]
+    fn test_find_pivot_row() {
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+
+        // Update cot uoc luong truoc
+        simplex.update_ratio_column(0);
+
+        // Tim hang xoay
+        let pivot_row = simplex.find_pivot_row();
+
+        // Hang xoay se la hang co he so cot uoc luong nho nhat
+        // Trong truong hop nay la hang 3 voi E = 2/1
+        assert_eq!(pivot_row, 2);
+    }
+
+    #[test]
+    fn test_pivot_operation() {
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+
+        // Ta biet phan tu xoay dau tien (hang 3, cot 1)
+        let pivot_row = 2;
+        let pivot_col = 0;
+
+        simplex.pivot(pivot_row, pivot_col);
+
+        // Sau khi bien doi, hang xoay se co phan tu xoay = 1.0
+        assert_abs_diff_eq!(simplex.tableau[(pivot_row, pivot_col)], 1.0);
+
+        // Cac phan tu khac trong cot xoay = 0.0
+        for row in 0..simplex.tableau.nrows() {
+            if row != pivot_row {
+                assert_abs_diff_eq!(simplex.tableau[(row, pivot_col)], 0.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_simplex_iteration() {
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+
+        // Thuc hien 1 lan lap don hinh
+        let continues = simplex.iterate();
+
+        // Buoc lap se tiep tuc vi chua tim duoc loi giai
+        assert!(continues);
+    }
+
+    #[test]
+    fn test_solve_standard_lp() {
+        // Xet bai toan quy hoach tuyen tinh dang chuan
+        // z = 3x1 + 2x2 -> max
+        // 2x1 + x2 <= 7
+        // x1 + 2x2 <= 8
+        // x1 - x2 <= 2
+        let c = DVector::from_vec(vec![3.0, 2.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[2.0, 1.0, 1.0, 2.0, 1.0, -1.0]);
+        let b = DVector::from_vec(vec![7.0, 8.0, 2.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+        let result = simplex.solve();
+
+        // Kiem tra su ton tai patu
+        assert!(result.is_some());
+
+        let (objective_value, solution) = result.unwrap();
+
+        // (x1 = 2, x2 = 3)
+        assert_abs_diff_eq!(solution[0], 2.0);
+        assert_abs_diff_eq!(solution[1], 3.0);
+
+        // z = 3*2 + 2*3 = 12
+        assert_abs_diff_eq!(objective_value, 12.0);
+    }
+
+    #[test]
+    fn test_solve_unbounded_lp() {
+        // Xet bai toan quy hoach tuyen tinh dang chuan
+        // Day la bai toan khong bi chan
+        // z = 3x1 + 5x2 -> max
+        // x1 - 2x2 <= 6
+        // x1       <= 10
+        //      x2  >= 1
+        let c = DVector::from_vec(vec![3.0, 5.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[1.0, -2.0, 1.0, 0.0, 0.0, -1.0]);
+        let b = DVector::from_vec(vec![6.0, 10.0, -1.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+        // Kiem tra su ton tai patu
+        let result = simplex.solve();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_solve_degenerate_lp() {
+        // Xet bai toan quy hoach tuyen tinh dang chuan
+        // Day la bai toan thoai hoa
+        // z = 2x1 + x2 -> max
+        // 4x1 + 3x2 <= 12
+        // 4x1 + x2  <= 8
+        // 4x1 + 2x2 <= 8
+        let c = DVector::from_vec(vec![2.0, 1.0]);
+        #[allow(non_snake_case)]
+        let A = DMatrix::from_row_slice(3, 2, &[4.0, 3.0, 4.0, 1.0, 4.0, 2.0]);
+        let b = DVector::from_vec(vec![12.0, 8.0, 8.0]);
+
+        let mut simplex = Simplex::new(c, A, b);
+        let result = simplex.solve();
+
+        // Kiem tra su ton tai patu
+        assert!(result.is_some());
+
+        let (objective_value, solution) = result.unwrap();
+
+        // (x1 = 2, x2 = 0)
+        assert_abs_diff_eq!(solution[0], 2.0);
+        assert_abs_diff_eq!(solution[1], 0.0);
+
+        // z = 2*2 + 1*0 = 4
+        assert_abs_diff_eq!(objective_value, 4.0);
     }
 }
